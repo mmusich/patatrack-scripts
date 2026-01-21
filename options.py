@@ -68,6 +68,12 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             default = 'cmsRun',
             help = 'specify what executable to run [default: cmsRun]')
 
+        self.parser.add_argument('--exit-on-failure',
+            dest = 'exit_on_failure',
+            action="store_true",
+            default = False,                     
+            help='Exit benchmark with a non-zero status if any cmsRun job fails')
+        
         self.parser.add_argument('-e', '--events',
             dest = 'events',
             action = 'store',

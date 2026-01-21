@@ -46,6 +46,7 @@ if __name__ == "__main__":
     'automerge'           : opts.automerge,
     'autodelete'          : opts.autodelete,
     'autodelete_delay'    : opts.autodelete_delay,
+    'exit_on_failure'     : opts.exit_on_failure,
   }
 
   # print a system overview
@@ -88,7 +89,10 @@ if __name__ == "__main__":
     # benchmark reading the input data
     print('Benchmarking only I/O')
     io_options = dict(options, logdir = None, keep = [], data = None)
-    multiCmsRun(io_process, **io_options)
+    try:
+      multiCmsRun(io_process, **io_options)
+    except CmsRunFailure:
+      sys.exit(1)
     print()
     # wait the required number of seconds between the I/O benchmark and the actual measurement
     if opts.wait > 0:
@@ -131,15 +135,21 @@ if __name__ == "__main__":
       else:
           ref_data = None
       ref_options = dict(options, logdir = ref_logdir, data = ref_data, environ = environ)
-      multiCmsRun(process, **ref_options)
+      try:
+        multiCmsRun(process, **ref_options)
+      except CmsRunFailure:
+        sys.exit(1)
       print()
     else:
       print('$CMSSW_RELEASE_BASE is not set, cannot benchmark the reference release')
     print()
 
   print('Benchmarking %s' % opts.config)
-  multiCmsRun(process, **options)
-
+  try:
+    multiCmsRun(process, **options)
+  except CmsRunFailure:
+    sys.exit(1)
+    
   # close the CSV file
   if options['data']:
     options['data'].close()

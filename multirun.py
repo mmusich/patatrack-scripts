@@ -37,6 +37,14 @@ cpus = get_cpu_info()
 gpus_nv  = get_gpu_info_nvidia()
 gpus_amd = get_gpu_info_amd()
 
+class CmsRunFailure(RuntimeError):
+    pass
+
+import threading
+
+_failure_lock = threading.Lock()
+_failure_exception = None
+
 # configure how to merge different files
 # 'inputs' can be
 #   - 'stdin'   to concatenate all inputs and pass them as standard input (NOT IMPLEMENTED), e.g.
@@ -141,7 +149,9 @@ def runMergeCommand(tag, workdir, inputs, output, verbose):
 
 
 @threaded
-def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], autodelete_delay = 60., verbose = False, slot = None, executable = 'cmsRun', environ = None, *args):
+def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], autodelete_delay = 60., verbose = False, slot = None, executable = 'cmsRun', environ = None, exit_on_failure = False, *args):
+  global _failure_exception
+    
   if slot is None:
       slot = Slot()
 
@@ -256,7 +266,15 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
     print("See %s and %s for the full logs" % logfiles)
     sys.stdout.flush()
     stderr.close()
-    return None
+    if(exit_on_failure):
+        with _failure_lock:
+            if _failure_exception is None:
+                _failure_exception = CmsRunFailure(
+                    f"{executable} failed for {filename} (return code {job.returncode})"
+                )
+        return None
+    else:
+        return None
 
   elif (job.returncode > 0):
     print("The underlying %s job failed with return code %d" % (executable, job.returncode))
@@ -267,7 +285,15 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
     print("See %s and %s for the full logs" % logfiles)
     sys.stdout.flush()
     stderr.close()
-    return None
+    if(exit_on_failure):
+        with _failure_lock:
+            if _failure_exception is None:
+                _failure_exception = CmsRunFailure(
+                    f"{executable} failed for {filename} (return code {job.returncode})"
+                )
+        return None        
+    else:
+        return None
 
   if verbose:
     print("The underlying %s job completed successfully" % executable)
@@ -362,6 +388,7 @@ def multiCmsRun(
     autodelete_delay = 60.,         # check for files to autodelete with this interval (default: 60s)
     executable = 'cmsRun',          # executable to run, usually cmsRun
     environ = None,                 # shell environment to use instead of os.environ
+    exit_on_failure = False,        # shuts down if there is a failure     
     *args):                         # additional arguments passed to the executable
 
   # set the number of streams and threads
@@ -504,6 +531,7 @@ def multiCmsRun(
         slot = slots[job],
         executable = executable,
         environ = environ,
+        exit_on_failure = exit_on_failure,
         *args)
 
     # start all threads
@@ -514,8 +542,10 @@ def multiCmsRun(
     if verbose:
       print("wait")
       sys.stdout.flush()
+
+
     for thread in job_threads:
-      thread.join()
+        thread.join()
 
     # delete all temporary directories
     for job in range(jobs):
@@ -592,12 +622,15 @@ def multiCmsRun(
         slot = slots[job],
         executable = executable,
         environ = environ,
+        exit_on_failure = exit_on_failure,
         *args)
 
     # start all threads
     for thread in job_threads:
-      thread.start()
-
+        thread.start()
+        if exit_on_failure and _failure_exception is not None:
+            break        
+        
     # join all threads
     if verbose:
       time.sleep(0.5)
@@ -852,6 +885,7 @@ if __name__ == "__main__":
     'logdir'              : opts.logdir if opts.logdir else None,
     'tmpdir'              : opts.tmpdir,
     'keep'                : opts.keep,
+    'exit_on_failure'     : opts.exit_on_failure,
   }
 
   if options['verbose']:
@@ -859,3 +893,6 @@ if __name__ == "__main__":
 
   process = parseProcess(opts.config)
   multiCmsRun(process, **options)
+
+  if exit_on_failure and _failure_exception is not None:
+    raise _failure_exception
